@@ -19,6 +19,7 @@ MODULE read_namelists_module
   !
   USE kinds,     ONLY : DP
   USE input_parameters
+  USE constants, ONLY : K_BOLTZMANN_RY
   !
   IMPLICIT NONE
   !
@@ -456,25 +457,35 @@ MODULE read_namelists_module
      !
      !=----------------------------------------------------------------------=!
      !
-     !-----------------------------------------------------------------------
      SUBROUTINE nlcg_defaults( prog )
              !
              IMPLICIT NONE
              !
-             CHARACTER(LEN=2) :: prog ! .. specify the calling probram
-#if defined(__SIRIUS)
+       CHARACTER(LEN=2) :: prog ! .. specify the calling program
+
+       nlcg_method = 'mvp2'
              nlcg_maxiter = 300
              nlcg_restart = 10
-             nlcg_tau = 0.1_DP
-             nlcg_T = 300.0_DP
-             nlcg_kappa = 0.3_DP
-             nlcg_tol = 1.0E-9_DP
-             nlcg_smearing = 'FD'
+       nlcg_bt_step_length = 0.1_DP
+       nlcg_T = degauss / K_BOLTZMANN_RY
+       nlcg_pseudo_precond = 0.3_DP
+       nlcg_conv_thr = conv_thr
              nlcg_processing_unit = 'none'
-#endif
-             RETURN
-     END SUBROUTINE
 
+       SELECT CASE( trim(smearing) )
+       CASE('gaussian', 'gauss', 'Gaussian', 'Gauss')
+         ! this is gaussian, but use gaussian spline for nlcg
+         nlcg_smearing = 'GAUSS'
+       CASE('mp', 'm-p', 'methfessel-paxton')
+         nlcg_smearing = 'MP'
+       CASE('fermi-dirac', 'f-d', 'fd', 'Fermi-Dirac', 'F-D', 'FD')
+         nlcg_smearing = 'FD'
+       CASE DEFAULT
+         nlcg_smearing = 'GAUSS'
+       END SELECT
+
+       RETURN
+     END SUBROUTINE nlcg_defaults
      !
      !
      !----------------------------------------------------------------------
@@ -1244,18 +1255,19 @@ MODULE read_namelists_module
        IMPLICIT NONE
        !
 #if defined(__SIRIUS)
+       CALL mp_bcast( nlcg_method,           ionode_id, intra_image_comm)
        CALL mp_bcast( nlcg_maxiter,          ionode_id, intra_image_comm )
        CALL mp_bcast( nlcg_restart,          ionode_id, intra_image_comm )
-       CALL mp_bcast( nlcg_tau,              ionode_id, intra_image_comm )
+       CALL mp_bcast( nlcg_bt_step_length,   ionode_id, intra_image_comm )
        CALL mp_bcast( nlcg_T,                ionode_id, intra_image_comm )
-       CALL mp_bcast( nlcg_kappa,            ionode_id, intra_image_comm )
-       CALL mp_bcast( nlcg_tol,              ionode_id, intra_image_comm )
+       CALL mp_bcast( nlcg_pseudo_precond,   ionode_id, intra_image_comm )
+       CALL mp_bcast( nlcg_conv_thr,         ionode_id, intra_image_comm )
        CALL mp_bcast( nlcg_smearing,         ionode_id, intra_image_comm )
        CALL mp_bcast( nlcg_processing_unit,  ionode_id, intra_image_comm )
 #endif
        RETURN
        !
-     END SUBROUTINE
+     END SUBROUTINE nlcg_bcast
      !
      !
      !-----------------------------------------------------------------------
@@ -1883,18 +1895,23 @@ MODULE read_namelists_module
      END SUBROUTINE
      !=----------------------------------------------------------------------=!
      !
-     !  Check input values for Namelist NLCG
+     !  Check input values for Namelist DIRECT_MINIMIZATION (nlcg)
      !
      !=----------------------------------------------------------------------=!
      !
      !-----------------------------------------------------------------------
      SUBROUTINE nlcg_checkin( prog )
        IMPLICIT NONE
-       CHARACTER(LEN=2)  :: prog   ! ... specify the calling program
-#if defined(__SIRIUS)
        LOGICAL :: allowed = .FALSE.
        CHARACTER(LEN=20) :: sub_name = ' nlcg_checkin '
+       CHARACTER(LEN=2)  :: prog   ! ... specify the calling program
        INTEGER           :: i
+       DO i = 1, SIZE(nlcg_method_allowed)
+         IF( TRIM(nlcg_method) == nlcg_method_allowed(i) ) allowed = .TRUE.
+       END DO
+       IF( .NOT. allowed ) &
+         CALL errore( sub_name, ' nlcg_method "'// &
+         & TRIM(nlcg_method)//'" not allowed ',1)
 
        DO i = 1, SIZE(nlcg_smearing_allowed)
          IF( TRIM(nlcg_smearing) == nlcg_smearing_allowed(i) ) allowed = .TRUE.
@@ -1912,19 +1929,18 @@ MODULE read_namelists_module
 
        IF ( nlcg_T < 0.0_DP ) &
          CALL errore(sub_name, 'nlcg_T out of range', 1)
-       IF ( nlcg_tau < 0.0_DP .or. nlcg_tau >= 1 ) &
-         CALL errore(sub_name, 'nlcg_tau out of range', 1)
-       IF ( nlcg_kappa < 0.0_DP ) &
+       IF ( nlcg_bt_step_length < 0.0_DP .or. nlcg_bt_step_length >= 1 ) &
+         CALL errore(sub_name, 'nlcg_bt_step_length out of range', 1)
+       IF ( nlcg_pseudo_precond < 0.0_DP ) &
          CALL errore(sub_name, 'nlcg_kappa out of range', 1)
-       IF ( nlcg_tol < 0.0_DP ) &
-         CALL errore(sub_name, 'nlcg_tol out of range', 1)
+       IF ( nlcg_conv_thr < 0.0_DP ) &
+         CALL errore(sub_name, 'nlcg_conv_thr out of range', 1)
        IF ( nlcg_maxiter < 0 ) &
          CALL errore(sub_name, 'nlcg_maxiter out of range', 1)
        IF ( nlcg_restart < 0 ) &
          CALL errore(sub_name, 'nlcg_restart out of range', 1)
-#endif
        RETURN
-     END SUBROUTINE
+     END SUBROUTINE nlcg_checkin
      !
      !
      !-----------------------------------------------------------------------
@@ -2522,13 +2538,26 @@ MODULE read_namelists_module
        ! ... NLCG namelist
        !
 #if defined(__SIRIUS)
-       IF ( use_sirius_nlcg ) THEN
+       !
+       ! ... NLCG namelist
+       ! call nclg_defaults here (note that it depends on inputs in SYSTEM)
+       CALL nlcg_defaults( prog )
          ios = 0
          IF( ionode ) THEN
-           READ( unit_loc, nlcg, iostat = ios )
+         READ( unit_loc, direct_minimization, iostat = ios )
          END IF
+       IF ( ios /= 0) THEN
+         ! READ failed, check if namelist did not exist or if parsing failed
+         CALL check_namelist_valid(ios, unit_loc, "direct_minimization")
+         ! reset input position
+         REWIND(unit_loc)
+         READ(unit_loc, electrons, iostat = ios)
+
+         use_sirius_nlcg=.false.
+       ELSE
          CALL check_namelist_read(ios, unit_loc, "nlcg")
-         !
+         use_sirius_nlcg=.true.
+         use_sirius_scf=.true.
          CALL nlcg_bcast( )
          CALL nlcg_checkin( prog )
        END IF
@@ -2551,17 +2580,10 @@ MODULE read_namelists_module
              ! presumably, not found: rewind the file pointer to the location
              ! of the previous present section, in this case electrons
              REWIND( unit_loc )
-             IF ( use_sirius_nlcg ) THEN
-#if defined(__SIRIUS)
-               READ( unit_loc, nlcg, iostat = ios )
-#endif
-             ELSE
                READ( unit_loc, electrons, iostat = ios )
              END IF
           END IF
           !
-       END IF
-       !
        CALL check_namelist_read(ios, unit_loc, "ions")
        !
        CALL ions_bcast( )
@@ -2691,4 +2713,76 @@ MODULE read_namelists_module
        !
      END SUBROUTINE check_namelist_read
      !
+     !
+     SUBROUTINE last_line(unit_loc, line)
+       USE io_global, ONLY : ionode, ionode_id
+       USE mp,        ONLY : mp_bcast
+       USE mp_images, ONLY : intra_image_comm
+
+       IMPLICIT NONE
+
+       INTEGER,INTENT(IN) :: unit_loc
+       INTEGER :: ios
+       CHARACTER(len=*),INTENT(OUT) :: line
+
+
+       IF ( ionode ) THEN
+         ! go back one line
+         BACKSPACE(unit_loc)
+         DO
+           READ(unit_loc, '(A512)', iostat=ios) line
+           IF (ios /= 0) THEN
+             exit
+           END IF
+         END DO
+
+         ! reset to begin of file
+         REWIND(unit_loc)
+       END IF
+       CALL mp_bcast(line, ionode_id, intra_image_comm)
+
+     END SUBROUTINE last_line
+     !
+     ! same as check_namelist_read, but check only for validity, e.g. do not throw if namelist wasn't found
+     SUBROUTINE check_namelist_valid(ios, unit_loc, nl_name)
+       USE io_global, ONLY : ionode, ionode_id
+       USE mp,        ONLY : mp_bcast
+       USE mp_images, ONLY : intra_image_comm
+       !
+       IMPLICIT NONE
+       INTEGER,INTENT(in) :: ios, unit_loc
+       CHARACTER(LEN=*) :: nl_name
+       CHARACTER(len=512) :: line
+       CHARACTER(len=512) :: lastline
+       INTEGER :: ios2
+       !
+       IF( ionode ) THEN
+         ios2=0
+         IF (ios /=0) THEN
+           BACKSPACE(unit_loc)
+           READ(unit_loc,'(A512)', iostat=ios2) line
+         END IF
+
+         CALL last_line(unit_loc, lastline)
+         CALL mp_bcast( lastline, ionode_id, intra_image_comm )
+       END IF
+
+       IF (lastline == line) THEN
+         ! 'lastline == line, this means nlcg namelist not found'
+         RETURN
+       END IF
+
+       CALL mp_bcast( ios2, ionode_id, intra_image_comm )
+       !
+       CALL mp_bcast( ios, ionode_id, intra_image_comm )
+       CALL mp_bcast( line, ionode_id, intra_image_comm )
+       IF( ios /= 0 ) THEN
+          CALL errore( ' read_namelists ', &
+                       ' bad line in namelist &'//TRIM(nl_name)//&
+                       ': "'//TRIM(line)//'" (error could be in the previous line)',&
+                       1 )
+       END IF
+       !
+     END SUBROUTINE check_namelist_valid
+
 END MODULE read_namelists_module
