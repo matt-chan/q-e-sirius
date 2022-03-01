@@ -485,7 +485,6 @@ MODULE read_namelists_module
        CASE DEFAULT
          nlcg_smearing = 'GAUSS'
        END SELECT
-
        RETURN
      END SUBROUTINE nlcg_defaults
      !
@@ -2548,12 +2547,16 @@ MODULE read_namelists_module
          IF( ionode ) THEN
          READ( unit_loc, direct_minimization, iostat = ios )
          END IF
+       ! bcast ios, because check_namelist_valid does comm too
+       CALL mp_bcast(ios, ionode_id, intra_image_comm)
        IF ( ios /= 0) THEN
          ! READ failed, check if namelist did not exist or if parsing failed
          CALL check_namelist_valid(ios, unit_loc, "direct_minimization")
          ! reset input position
+         IF( ionode ) THEN
          REWIND(unit_loc)
          READ(unit_loc, electrons, iostat = ios)
+         ENDIF
 
          use_sirius_nlcg=.false.
        ELSE
@@ -2718,15 +2721,14 @@ MODULE read_namelists_module
      !
      SUBROUTINE last_line(unit_loc, line)
        USE io_global, ONLY : ionode, ionode_id
-       USE mp,        ONLY : mp_bcast
-       USE mp_images, ONLY : intra_image_comm
+       ! USE mp,        ONLY : mp_bcast
+       ! USE mp_images, ONLY : intra_image_comm
 
        IMPLICIT NONE
 
        INTEGER,INTENT(IN) :: unit_loc
        INTEGER :: ios
        CHARACTER(len=*),INTENT(OUT) :: line
-
 
        IF ( ionode ) THEN
          ! go back one line
@@ -2737,11 +2739,9 @@ MODULE read_namelists_module
              exit
            END IF
          END DO
-
          ! reset to begin of file
          REWIND(unit_loc)
        END IF
-       CALL mp_bcast(line, ionode_id, intra_image_comm)
 
      END SUBROUTINE last_line
      !
@@ -2766,8 +2766,10 @@ MODULE read_namelists_module
          END IF
 
          CALL last_line(unit_loc, lastline)
-         CALL mp_bcast( lastline, ionode_id, intra_image_comm )
        END IF
+
+       CALL mp_bcast( line, ionode_id, intra_image_comm )
+       CALL mp_bcast( lastline, ionode_id, intra_image_comm )
 
        IF (lastline == line) THEN
          ! 'lastline == line, this means nlcg namelist not found'
