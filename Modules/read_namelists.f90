@@ -13,7 +13,7 @@
 !----------------------------------------------------------------------------
 MODULE read_namelists_module
   !----------------------------------------------------------------------------
-  !! This module handles the reading of input namelists.  
+  !! This module handles the reading of input namelists.
   !! Written by Carlo Cavazzoni, with many additions.
   !  --------------------------------------------------
   !
@@ -61,7 +61,7 @@ MODULE read_namelists_module
        CHARACTER(LEN=2) :: prog
        !! specify the calling program
        !
-       CHARACTER(LEN=20) ::    temp_string 
+       CHARACTER(LEN=20) ::    temp_string
        !
        !
        IF ( prog == 'PW' ) THEN
@@ -127,7 +127,7 @@ MODULE read_namelists_module
        lelfield = .FALSE.
        lorbm = .FALSE.
        nberrycyc  = 1
-       lecrpa   = .FALSE.   
+       lecrpa   = .FALSE.
        lfcp = .FALSE.
        tqmmm = .FALSE.
        trism = .FALSE.
@@ -464,13 +464,13 @@ MODULE read_namelists_module
        CHARACTER(LEN=2) :: prog ! .. specify the calling program
 
        nlcg_method = 'mvp2'
-             nlcg_maxiter = 300
-             nlcg_restart = 10
+       nlcg_maxiter = 300
+       nlcg_restart = 10
        nlcg_bt_step_length = 0.1_DP
        nlcg_T = degauss / K_BOLTZMANN_RY
        nlcg_pseudo_precond = 0.3_DP
        nlcg_conv_thr = conv_thr
-             nlcg_processing_unit = 'none'
+       nlcg_processing_unit = 'none'
 
        SELECT CASE( trim(smearing) )
        CASE('gaussian', 'gauss', 'Gaussian', 'Gauss')
@@ -573,14 +573,14 @@ MODULE read_namelists_module
        w_1              = 0.01_DP
        w_2              = 0.50_DP
        !
-       ! FIRE minimization defaults 
+       ! FIRE minimization defaults
        !
        fire_nmin = 5 ! minimum number of steps P > 0 before dt increas
        fire_f_inc = 1.1_DP ! factor for time step increase
-       fire_f_dec = 0.5_DP ! factor for time step decrease 
+       fire_f_dec = 0.5_DP ! factor for time step decrease
        fire_alpha_init = 0.20_DP ! initial value of mixing factor
        fire_falpha = 0.99_DP ! modification of the mixing factor
-       fire_dtmax = 10.0_DP ! factor for calculating dtmax 
+       fire_dtmax = 10.0_DP ! factor for calculating dtmax
        RETURN
        !
      END SUBROUTINE
@@ -2460,9 +2460,9 @@ MODULE read_namelists_module
        ! ... declare variables
        !
        CHARACTER(LEN=*) :: prog_
-       !! specifies the calling program, allowed:  
-       !! prog = 'PW'     pwscf  
-       !! prog = 'CP'     cp  
+       !! specifies the calling program, allowed:
+       !! prog = 'PW'     pwscf
+       !! prog = 'CP'     cp
        !! prog = 'PW+iPi' pwscf + i-Pi
        !
        INTEGER, INTENT(IN), optional :: unit
@@ -2543,10 +2543,10 @@ MODULE read_namelists_module
        ! ... NLCG namelist
        ! call nclg_defaults here (note that it depends on inputs in SYSTEM)
        CALL nlcg_defaults( prog )
-         ios = 0
-         IF( ionode ) THEN
+       ios = 0
+       IF( ionode ) THEN
          READ( unit_loc, direct_minimization, iostat = ios )
-         END IF
+       END IF
        ! bcast ios, because check_namelist_valid does comm too
        CALL mp_bcast(ios, ionode_id, intra_image_comm)
        IF ( ios /= 0) THEN
@@ -2554,8 +2554,8 @@ MODULE read_namelists_module
          CALL check_namelist_valid(ios, unit_loc, "direct_minimization")
          ! reset input position
          IF( ionode ) THEN
-         REWIND(unit_loc)
-         READ(unit_loc, electrons, iostat = ios)
+           REWIND(unit_loc)
+           READ(unit_loc, electrons, iostat = ios)
          ENDIF
 
          use_sirius_nlcg=.false.
@@ -2573,23 +2573,23 @@ MODULE read_namelists_module
        !
        ios = 0
        IF ( ionode ) THEN
-          IF ( ( TRIM( calculation ) /= 'nscf'  .AND. &
-                 TRIM( calculation ) /= 'bands' ) .OR. &
-               ( TRIM( prog_ ) == 'PW+iPi' ) ) THEN
+         IF ( ( TRIM( calculation ) /= 'nscf'  .AND. &
+                TRIM( calculation ) /= 'bands' ) .OR. &
+                 ( TRIM( prog_ ) == 'PW+iPi' ) ) THEN
              READ( unit_loc, ions, iostat = ios )
-          END IF
+         END IF
           !
           ! SCF might (optionally) have &ions :: ion_positions = 'from_file'
           !
           IF ( (ios /= 0) .AND. TRIM( calculation ) == 'scf' ) THEN
-             ! presumably, not found: rewind the file pointer to the location
-             ! of the previous present section, in this case electrons
-             REWIND( unit_loc )
-               READ( unit_loc, electrons, iostat = ios )
-             END IF
+            ! presumably, not found: rewind the file pointer to the location
+            ! of the previous present section, in this case electrons
+            REWIND( unit_loc )
+            READ( unit_loc, electrons, iostat = ios )
           END IF
+        END IF
           !
-       CALL check_namelist_read(ios, unit_loc, "ions")
+        CALL check_namelist_read(ios, unit_loc, "ions")
        !
        CALL ions_bcast( )
        CALL ions_checkin( prog )
