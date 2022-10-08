@@ -544,7 +544,6 @@ SUBROUTINE electrons_scf ( printout, exxen )
     ! look only for the convergence of the density; converge total energy only to 10^-4
     CALL sirius_find_ground_state(gs_handler, density_tol=tr2, energy_tol=1d-4, max_niter=niter,&
         &iter_solver_tol=ethr, save_state=.false., converged=conv_elec, niter=iter)
-    CALL stop_clock( 'electrons' )
 
     CALL sirius_get_energy(gs_handler, "descf", descf)
     descf = descf * 2.d0 ! convert to Ry
