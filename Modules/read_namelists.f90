@@ -2564,7 +2564,7 @@ MODULE read_namelists_module
          IF (use_qe_scf) THEN
            CALL errore('read_namelists', 'DIRECT_MINIMIZATION namelist present while -use_qe_scf specified.', 1)
          ENDIF
-         CALL check_namelist_read(ios, unit_loc, "nlcg")
+         CALL check_namelist_read(ios, unit_loc, "direct_minimization")
          use_sirius_nlcg=.true.
          use_sirius_scf=.true.
          CALL nlcg_bcast( )
